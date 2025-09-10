@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'screens/splash_screen.dart';
 import 'screens/upload_screen.dart';
 import 'screens/connection_screen.dart';
+import 'screens/control_screen.dart'; // استدعاء الشاشة الجديدة
 
 void main() {
   runApp(ZiggyBotApp());
@@ -21,6 +22,7 @@ class ZiggyBotApp extends StatelessWidget {
         "/": (context) => SplashScreen(),
         "/connection": (context) => ConnectionScreen(),
         "/upload": (context) => UploadScreen(),
+        "/control": (context) => ControlScreen(), // أضفنا الكنترول
       },
     );
   }

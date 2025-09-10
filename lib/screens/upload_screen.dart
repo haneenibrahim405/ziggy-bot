@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:http/http.dart' as http;
 import 'dart:io';
-import 'dart:convert';
-
 import '../widgets/bottom_nav.dart';
+import '../services/upload_service.dart';
 
 class UploadScreen extends StatefulWidget {
   @override
@@ -16,11 +14,12 @@ class _UploadScreenState extends State<UploadScreen> {
   bool isLoading = false;
   String? responseMessage;
 
+  final UploadService _uploadService = UploadService();
+
   final Color containerColor = Color(0xFFE0E0E0);
   final Color chooseButtonColor = Color(0xFF231A4E);
   final Color uploadButtonColor = Color(0xFF231A4E);
   final Color iconColor = Color(0xFF231A4E);
-  final Color progressColor = Colors.white;
 
   Future<void> _pickImage() async {
     try {
@@ -34,7 +33,7 @@ class _UploadScreenState extends State<UploadScreen> {
       }
     } catch (e) {
       setState(() {
-        responseMessage = "❌ Error picking image: ${e.toString()}";
+        responseMessage = "Error picking image: ${e.toString()}";
       });
     }
   }
@@ -42,7 +41,7 @@ class _UploadScreenState extends State<UploadScreen> {
   Future<void> _uploadImage() async {
     if (_image == null) {
       setState(() {
-        responseMessage = "❌ Please choose an image first";
+        responseMessage = "Please choose an image first";
       });
       return;
     }
@@ -52,49 +51,12 @@ class _UploadScreenState extends State<UploadScreen> {
       responseMessage = null;
     });
 
-    try {
-      var request = http.MultipartRequest(
-        "POST",
-        Uri.parse("http://192.168.1.5:8000/upload/")
-      );
+    final result = await _uploadService.uploadImage(_image!);
 
-      request.files.add(await http.MultipartFile.fromPath("image", _image!.path));
-
-      var response = await request.send();
-      final resString = await response.stream.bytesToString();
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(resString);
-        setState(() {
-          responseMessage = "✅ Uploaded! Found ${data["stroke_count"]} strokes.";
-        });
-      } else {
-        final errorData = jsonDecode(resString);
-        setState(() {
-          responseMessage = "❌ Upload failed: ${errorData["error"] ?? "Unknown error"}";
-        });
-      }
-    } on SocketException {
-      setState(() {
-        responseMessage = "❌ Connection error: Cannot connect to server. Make sure the server is running.";
-      });
-    } on HttpException {
-      setState(() {
-        responseMessage = "❌ HTTP error: Could not connect to the server.";
-      });
-    } on FormatException {
-      setState(() {
-        responseMessage = "❌ Format error: Invalid response from server.";
-      });
-    } catch (e) {
-      setState(() {
-        responseMessage = "❌ Unexpected error: ${e.toString()}";
-      });
-    } finally {
-      setState(() {
-        isLoading = false;
-      });
-    }
+    setState(() {
+      responseMessage = result;
+      isLoading = false;
+    });
   }
 
   @override
@@ -159,13 +121,12 @@ class _UploadScreenState extends State<UploadScreen> {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      padding:
+                      EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                     ),
                     child: Text("Choose Image"),
                   ),
-
                   const SizedBox(width: 15),
-
                   ElevatedButton(
                     onPressed: isLoading ? null : _uploadImage,
                     style: ElevatedButton.styleFrom(
@@ -174,7 +135,8 @@ class _UploadScreenState extends State<UploadScreen> {
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      padding: EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                      padding:
+                      EdgeInsets.symmetric(horizontal: 30, vertical: 12),
                     ),
                     child: isLoading
                         ? SizedBox(
@@ -182,7 +144,8 @@ class _UploadScreenState extends State<UploadScreen> {
                       height: 20,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        valueColor:
+                        AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
                         : Text("Upload"),
@@ -196,7 +159,8 @@ class _UploadScreenState extends State<UploadScreen> {
                 Column(
                   children: [
                     CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(uploadButtonColor),
+                      valueColor:
+                      AlwaysStoppedAnimation<Color>(uploadButtonColor),
                     ),
                     SizedBox(height: 10),
                     Text(
@@ -216,10 +180,14 @@ class _UploadScreenState extends State<UploadScreen> {
                   width: double.infinity,
                   padding: EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: responseMessage!.contains("✅") ? Colors.green[50] : Colors.red[50],
+                    color: responseMessage!.toLowerCase().contains("uploaded")
+                        ? Colors.green[50]
+                        : Colors.red[50],
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: responseMessage!.contains("✅") ? Colors.green : Colors.red,
+                      color: responseMessage!.toLowerCase().contains("uploaded")
+                          ? Colors.green
+                          : Colors.red,
                       width: 1,
                     ),
                   ),
@@ -228,7 +196,9 @@ class _UploadScreenState extends State<UploadScreen> {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: responseMessage!.contains("✅") ? Colors.green[800] : Colors.red[800],
+                      color: responseMessage!.toLowerCase().contains("uploaded")
+                          ? Colors.green[800]
+                          : Colors.red[800],
                     ),
                     textAlign: TextAlign.center,
                   ),

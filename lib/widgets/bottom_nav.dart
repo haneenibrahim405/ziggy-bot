@@ -14,11 +14,14 @@ class BottomNav extends StatelessWidget {
           Navigator.pushReplacementNamed(context, "/connection");
         } else if (index == 1) {
           Navigator.pushReplacementNamed(context, "/upload");
+        } else if (index == 2) {
+          Navigator.pushReplacementNamed(context, "/control");
         }
       },
       items: const [
         BottomNavigationBarItem(icon: Icon(Icons.power_settings_new), label: ""),
         BottomNavigationBarItem(icon: Icon(Icons.cloud_upload), label: ""),
+        BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: ""),
       ],
     );
   }

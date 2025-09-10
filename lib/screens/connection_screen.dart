@@ -1,25 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../widgets/bottom_nav.dart';
+import '../services/connection_service.dart';
 
 class ConnectionScreen extends StatefulWidget {
+  const ConnectionScreen({super.key});
+
   @override
-  _ConnectionScreenState createState() => _ConnectionScreenState();
+  State<ConnectionScreen> createState() => _ConnectionScreenState();
 }
 
 class _ConnectionScreenState extends State<ConnectionScreen> {
   bool isOn = false;
+  late ConnectionService connectionService;
 
   @override
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+    connectionService = ConnectionService(baseUrl: "http://192.168.1.100");
+  }
+
+  Future<void> _toggleConnection() async {
+    setState(() => isOn = !isOn);
+    final success = await connectionService.toggle(isOn);
+
+    if (!success) {
+      setState(() => isOn = !isOn);
+      debugPrint("Connection failed");
+    } else {
+      debugPrint("Connection ${isOn ? "ON" : "OFF"}");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle(
+      value: const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.dark,
         systemNavigationBarColor: Colors.transparent,
@@ -27,7 +45,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
       ),
       child: Scaffold(
         backgroundColor: Colors.white,
-        bottomNavigationBar: BottomNav(currentIndex: 0),
+        bottomNavigationBar: const BottomNav(currentIndex: 0),
         body: SafeArea(
           bottom: false,
           child: Center(
@@ -36,6 +54,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
               children: [
                 Image.asset("assets/ziggy.png", height: 150),
                 const SizedBox(height: 30),
+
                 Text(
                   "Connection is ${isOn ? "ON" : "OFF"}",
                   style: TextStyle(
@@ -44,16 +63,13 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                     color: isOn ? Colors.green : Colors.red,
                   ),
                 ),
+
                 const SizedBox(height: 30),
 
                 GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      isOn = !isOn;
-                    });
-                  },
+                  onTap: _toggleConnection,
                   child: AnimatedContainer(
-                    duration: Duration(milliseconds: 300),
+                    duration: const Duration(milliseconds: 300),
                     curve: Curves.easeInOut,
                     width: 120,
                     height: 60,
@@ -64,14 +80,14 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                         BoxShadow(
                           color: Colors.black.withOpacity(0.2),
                           blurRadius: 8,
-                          offset: Offset(0, 3),
+                          offset: const Offset(0, 3),
                         )
                       ],
                     ),
                     child: Stack(
                       children: [
                         if (isOn)
-                          Positioned(
+                          const Positioned(
                             left: 15,
                             top: 20,
                             child: Text(
@@ -90,7 +106,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                             child: Text(
                               "OFF",
                               style: TextStyle(
-                                color: Colors.grey[700],
+                                color: Colors.grey,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14,
                               ),
@@ -98,7 +114,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                           ),
 
                         AnimatedPositioned(
-                          duration: Duration(milliseconds: 300),
+                          duration: const Duration(milliseconds: 300),
                           curve: Curves.easeInOut,
                           left: isOn ? 60 : 4,
                           top: 4,
@@ -112,7 +128,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                                 BoxShadow(
                                   color: Colors.black.withOpacity(0.2),
                                   blurRadius: 5,
-                                  offset: Offset(0, 2),
+                                  offset: const Offset(0, 2),
                                 )
                               ],
                             ),
@@ -127,7 +143,9 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                     ),
                   ),
                 ),
+
                 const SizedBox(height: 20),
+
                 Text(
                   "Tap to ${isOn ? "disconnect" : "connect"}",
                   style: TextStyle(
