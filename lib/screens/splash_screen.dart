@@ -18,7 +18,7 @@ class SplashScreen extends StatelessWidget {
             Image.asset("assets/ziggy.png", height: 200),
             const SizedBox(height: 20),
             Text(
-              "ZIGGY BOT",
+              "SPIDEY DRAW",
               style: GoogleFonts.allertaStencil(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
@@ -31,7 +31,7 @@ class SplashScreen extends StatelessWidget {
               height: 50,
               child: ElevatedButton(
                 onPressed: () {
-                  Navigator.pushReplacementNamed(context, "/connection");
+                  Navigator.pushReplacementNamed(context, "/upload");
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: uploadButtonColor,

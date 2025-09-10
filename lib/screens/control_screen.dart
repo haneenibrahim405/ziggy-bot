@@ -70,7 +70,7 @@ class _ControlScreenState extends State<ControlScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      bottomNavigationBar: const BottomNav(currentIndex: 2),
+      bottomNavigationBar: const BottomNav(currentIndex: 1),
       body: SafeArea(
         child: Column(
           children: [

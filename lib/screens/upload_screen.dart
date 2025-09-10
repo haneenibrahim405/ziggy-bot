@@ -63,7 +63,7 @@ class _UploadScreenState extends State<UploadScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      bottomNavigationBar: BottomNav(currentIndex: 1),
+      bottomNavigationBar: BottomNav(currentIndex: 0),
       body: Center(
         child: SingleChildScrollView(
           padding: EdgeInsets.all(20),
@@ -72,6 +72,19 @@ class _UploadScreenState extends State<UploadScreen> {
             children: [
               Image.asset("assets/ziggy.png", height: 120),
               const SizedBox(height: 20),
+
+              // Original image
+              if (_image != null) ...[
+                Text(
+                  "Original Image",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: uploadButtonColor,
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               Container(
                 height: 400,
                 width: double.infinity,
@@ -128,7 +141,8 @@ class _UploadScreenState extends State<UploadScreen> {
                   ),
                   const SizedBox(width: 15),
                   ElevatedButton(
-                    onPressed: isLoading ? null : _uploadImage,
+                    onPressed:
+                    (isLoading || _image == null) ? null : _uploadImage,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: uploadButtonColor,
                       foregroundColor: Colors.white,
@@ -176,33 +190,63 @@ class _UploadScreenState extends State<UploadScreen> {
               ],
 
               if (responseMessage != null) ...[
+                Text(
+                  "Processed Image",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: uploadButtonColor,
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Container(
+                  height: 300,
                   width: double.infinity,
-                  padding: EdgeInsets.all(12),
+                  constraints: BoxConstraints(maxWidth: 300),
                   decoration: BoxDecoration(
-                    color: responseMessage!.toLowerCase().contains("uploaded")
-                        ? Colors.green[50]
-                        : Colors.red[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: responseMessage!.toLowerCase().contains("uploaded")
-                          ? Colors.green
-                          : Colors.red,
-                      width: 1,
-                    ),
+                    color: containerColor,
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(color: Colors.grey.shade300),
                   ),
-                  child: Text(
-                    responseMessage!,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: responseMessage!.toLowerCase().contains("uploaded")
-                          ? Colors.green[800]
-                          : Colors.red[800],
-                    ),
-                    textAlign: TextAlign.center,
+                  child: Builder(
+                    builder: (_) {
+                      final processedBytes =
+                      _uploadService.lastResult?.getProcessedImageBytes();
+
+                      if (processedBytes != null) {
+                        return Image.memory(processedBytes,
+                            fit: BoxFit.contain);
+                      } else if (_image != null) {
+                        return Image.file(_image!, fit: BoxFit.contain);
+                      } else {
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.cloud_upload,
+                                size: 60, color: iconColor),
+                            SizedBox(height: 10),
+                            Text(
+                              "Upload PNG Image",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: iconColor,
+                              ),
+                            ),
+                            SizedBox(height: 5),
+                            Text(
+                              "Tap 'Choose Image' to select",
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+                    },
                   ),
-                )
+                ),
               ]
             ],
           ),
