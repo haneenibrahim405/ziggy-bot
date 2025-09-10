@@ -22,7 +22,8 @@ class _ControlScreenState extends State<ControlScreen> {
     }
   }
 
-  Widget buildControlButton(String direction, IconData icon) {
+  Widget buildControlButton(String direction, IconData icon,
+      {Color? activeColor, Color? inactiveColor, Color? iconActiveColor, Color? iconInactiveColor}) {
     final bool isActive = activeDirection == direction;
     return Column(
       children: [
@@ -32,10 +33,14 @@ class _ControlScreenState extends State<ControlScreen> {
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: isActive ? Colors.blue[400] : Colors.blue[100],
+              color: isActive
+                  ? (activeColor ?? Colors.blue[400])
+                  : (inactiveColor ?? Colors.blue[100]),
               shape: BoxShape.circle,
               border: Border.all(
-                color: isActive ? Colors.blue[800]! : Colors.blue[300]!,
+                color: isActive
+                    ? (activeColor ?? Colors.blue[800]!)
+                    : (inactiveColor ?? Colors.blue[300]!),
                 width: 3,
               ),
               boxShadow: [
@@ -49,7 +54,9 @@ class _ControlScreenState extends State<ControlScreen> {
             child: Icon(
               icon,
               size: 50,
-              color: isActive ? Colors.white : Colors.blue[800],
+              color: isActive
+                  ? (iconActiveColor ?? Colors.white)
+                  : (iconInactiveColor ?? Colors.blue[800]),
             ),
           ),
         ),
@@ -59,7 +66,9 @@ class _ControlScreenState extends State<ControlScreen> {
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w700,
-            color: isActive ? Colors.blue[800] : Colors.grey[700],
+            color: isActive
+                ? (activeColor ?? Colors.blue[800])
+                : Colors.grey[700],
           ),
         )
       ],
@@ -79,7 +88,7 @@ class _ControlScreenState extends State<ControlScreen> {
             const SizedBox(height: 15),
             Text(
               "NAVIGATION",
-              style: GoogleFonts.allertaStencil(
+              style: GoogleFonts.audiowide(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
                 color: const Color(0xFF231A4E),
@@ -96,7 +105,16 @@ class _ControlScreenState extends State<ControlScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       buildControlButton("left", Icons.arrow_left),
-                      const SizedBox(width: 140),
+                      const SizedBox(width: 60),
+                      buildControlButton(
+                        "stop",
+                        Icons.stop,
+                        activeColor: Colors.red[400],
+                        inactiveColor: Colors.red[100],
+                        iconActiveColor: Colors.white,
+                        iconInactiveColor: Colors.red[800],
+                      ),
+                      const SizedBox(width: 60),
                       buildControlButton("right", Icons.arrow_right),
                     ],
                   ),

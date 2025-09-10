@@ -19,7 +19,7 @@ class SplashScreen extends StatelessWidget {
             const SizedBox(height: 20),
             Text(
               "SPIDEY DRAW",
-              style: GoogleFonts.allertaStencil(
+              style: GoogleFonts.audiowide(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
                 color: iconColor,
@@ -42,7 +42,7 @@ class SplashScreen extends StatelessWidget {
                 ),
                 child: Text(
                   "Get Started",
-                  style: GoogleFonts.allertaStencil(
+                  style: GoogleFonts.audiowide(
                     fontSize: 18,
                   ),
                 ),

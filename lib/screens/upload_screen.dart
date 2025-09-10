@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../widgets/bottom_nav.dart';
@@ -77,7 +78,7 @@ class _UploadScreenState extends State<UploadScreen> {
               if (_image != null) ...[
                 Text(
                   "Original Image",
-                  style: TextStyle(
+                    style: GoogleFonts.audiowide(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: uploadButtonColor,
@@ -86,9 +87,9 @@ class _UploadScreenState extends State<UploadScreen> {
                 const SizedBox(height: 10),
               ],
               Container(
-                height: 400,
+                height: 300,
                 width: double.infinity,
-                constraints: BoxConstraints(maxWidth: 350),
+                constraints: BoxConstraints(maxWidth: 300),
                 decoration: BoxDecoration(
                   color: containerColor,
                   borderRadius: BorderRadius.circular(15),
@@ -102,7 +103,7 @@ class _UploadScreenState extends State<UploadScreen> {
                     SizedBox(height: 10),
                     Text(
                       "Upload PNG Image",
-                      style: TextStyle(
+                      style: GoogleFonts.audiowide(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: iconColor,
@@ -111,7 +112,7 @@ class _UploadScreenState extends State<UploadScreen> {
                     SizedBox(height: 5),
                     Text(
                       "Tap 'Choose Image' to select",
-                      style: TextStyle(
+                      style: GoogleFonts.audiowide(
                         fontSize: 14,
                         color: Colors.grey,
                       ),
@@ -137,7 +138,14 @@ class _UploadScreenState extends State<UploadScreen> {
                       padding:
                       EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                     ),
-                    child: Text("Choose Image"),
+                    child: Text(
+                        "Choose Image",
+                        style: GoogleFonts.audiowide(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 15),
                   ElevatedButton(
@@ -162,7 +170,14 @@ class _UploadScreenState extends State<UploadScreen> {
                         AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
-                        : Text("Upload"),
+                        : Text(
+                        "Upload",
+                        style: GoogleFonts.audiowide(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        ),
+                    ),
                   ),
                 ],
               ),
@@ -179,7 +194,7 @@ class _UploadScreenState extends State<UploadScreen> {
                     SizedBox(height: 10),
                     Text(
                       "Processing image...",
-                      style: TextStyle(
+                      style: GoogleFonts.audiowide(
                         fontSize: 16,
                         color: uploadButtonColor,
                       ),
@@ -188,11 +203,10 @@ class _UploadScreenState extends State<UploadScreen> {
                 ),
                 SizedBox(height: 20),
               ],
-
               if (responseMessage != null) ...[
                 Text(
                   "Processed Image",
-                  style: TextStyle(
+                  style: GoogleFonts.audiowide(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: uploadButtonColor,
@@ -214,34 +228,18 @@ class _UploadScreenState extends State<UploadScreen> {
                       _uploadService.lastResult?.getProcessedImageBytes();
 
                       if (processedBytes != null) {
-                        return Image.memory(processedBytes,
-                            fit: BoxFit.contain);
-                      } else if (_image != null) {
-                        return Image.file(_image!, fit: BoxFit.contain);
+                        return Image.memory(processedBytes, fit: BoxFit.contain);
                       } else {
-                        return Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.cloud_upload,
-                                size: 60, color: iconColor),
-                            SizedBox(height: 10),
-                            Text(
-                              "Upload PNG Image",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: iconColor,
-                              ),
+                        return Center(
+                          child: Text(
+                            responseMessage ?? "No processed image",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.red,
+                              fontWeight: FontWeight.bold,
                             ),
-                            SizedBox(height: 5),
-                            Text(
-                              "Tap 'Choose Image' to select",
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
+                          ),
                         );
                       }
                     },
