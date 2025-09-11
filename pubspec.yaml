@@ -40,7 +40,9 @@ dependencies:
   path_provider: ^2.1.5
   http_parser: ^4.0.2
   iconsax: ^0.0.8
+  flutter_image_processing: ^0.0.4
   flutter_launcher_icons: "^0.13.1"
+  opencv_4: ^1.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

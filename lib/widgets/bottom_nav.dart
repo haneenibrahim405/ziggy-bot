@@ -20,7 +20,7 @@ class BottomNav extends StatelessWidget {
       },
       items: const [
         BottomNavigationBarItem(icon: Icon(Icons.cloud_upload), label: ""),
-        BottomNavigationBarItem(icon: Icon(Icons.gamepad), label: ""),
+        BottomNavigationBarItem(icon: Icon(Icons.navigation), label: ""),
         BottomNavigationBarItem(icon: Icon(Icons.draw), label: ""),
       ],
     );

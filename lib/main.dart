@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:ziggy/screens/compass_control_screen.dart';
 import 'package:ziggy/screens/drawing_page.dart';
 import 'screens/splash_screen.dart';
 import 'screens/upload_screen.dart';
-import 'screens/control_screen.dart';
 
 void main() {
   runApp(ZiggyBotApp());
@@ -21,7 +21,7 @@ class ZiggyBotApp extends StatelessWidget {
       routes: {
         "/": (context) => SplashScreen(),
         "/upload": (context) => UploadScreen(),
-        "/control": (context) => ControlScreen(),
+        "/control": (context) => CompassControlScreen(),
         "/drawing": (context) => DrawingPage(),
       },
     );
