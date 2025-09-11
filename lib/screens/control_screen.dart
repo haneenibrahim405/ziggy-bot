@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../services/control_service.dart';
 import '../widgets/bottom_nav.dart';
 
 class ControlScreen extends StatefulWidget {
@@ -11,12 +10,14 @@ class ControlScreen extends StatefulWidget {
 }
 
 class _ControlScreenState extends State<ControlScreen> {
-  final ControlService _controlService = ControlService();
   String? activeDirection;
 
   Future<void> _handleCommand(String command) async {
     setState(() => activeDirection = command);
-    await _controlService.sendCommand(command);
+
+    // Simulate button press feedback
+    await Future.delayed(Duration(milliseconds: 200));
+
     if (mounted) {
       setState(() => activeDirection = null);
     }

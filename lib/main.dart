@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ziggy/screens/drawing_page.dart';
 import 'screens/splash_screen.dart';
 import 'screens/upload_screen.dart';
 import 'screens/control_screen.dart';
@@ -21,6 +22,7 @@ class ZiggyBotApp extends StatelessWidget {
         "/": (context) => SplashScreen(),
         "/upload": (context) => UploadScreen(),
         "/control": (context) => ControlScreen(),
+        "/drawing": (context) => DrawingPage(),
       },
     );
   }
