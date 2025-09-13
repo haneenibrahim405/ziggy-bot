@@ -154,7 +154,7 @@ class _CompassControlScreenState extends State<CompassControlScreen>
           Image.asset("assets/ziggy.png", height: 80),
           const SizedBox(height: 10),
           Text(
-            "INTERACTIVE COMPASS",
+            "INTERACTIVE NAVIGATION",
             style: GoogleFonts.audiowide(
               fontSize: 18,
               fontWeight: FontWeight.bold,
@@ -293,7 +293,6 @@ class _CompassControlScreenState extends State<CompassControlScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // مؤشر الزاوية الحالية
           Container(
             padding: EdgeInsets.symmetric(vertical: 15, horizontal: 20),
             decoration: BoxDecoration(
