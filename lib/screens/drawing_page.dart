@@ -234,7 +234,7 @@ class _DrawingPageState extends State<DrawingPage> {
                   children: [
                     // Drawing Canvas
                     Expanded(
-                      flex: 2,
+                      flex: 3,
                       child: Container(
                         width: double.infinity,
                         decoration: BoxDecoration(
@@ -298,7 +298,7 @@ class _DrawingPageState extends State<DrawingPage> {
 
                     // Processed Image Display
                     Expanded(
-                      flex: 1,
+                      flex: 3,
                       child: Container(
                         width: double.infinity,
                         decoration: BoxDecoration(
@@ -328,7 +328,7 @@ class _DrawingPageState extends State<DrawingPage> {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.auto_fix_high, color: Colors.blue.shade700, size: 18),
+                                  Icon(Icons.auto_fix_high, color: Colors.grey, size: 18),
                                   SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
@@ -453,15 +453,15 @@ class _DrawingPageState extends State<DrawingPage> {
                           ),
                         ),
                         SizedBox(width: 12),
-                        Text("Processing..."),
+                        Text("Processing...", style: GoogleFonts.audiowide()),
                       ],
                     )
                         : Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.auto_fix_high),
+                        Icon(Icons.auto_fix_high, color :Colors.white),
                         SizedBox(width: 8),
-                        Text("Process Drawing", style: GoogleFonts.audiowide())
+                        Text("Process Drawing", style: GoogleFonts.audiowide()),
                       ],
                     ),
                   ),
