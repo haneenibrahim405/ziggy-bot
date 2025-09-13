@@ -162,7 +162,7 @@ class _DrawingPageState extends State<DrawingPage> {
                     SizedBox(width: 12),
                     Text(
                       "Drawing Canvas",
-                      style: GoogleFonts.poppins(
+                      style: GoogleFonts.audiowide(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
                         color: Colors.blue.shade700,
@@ -333,7 +333,7 @@ class _DrawingPageState extends State<DrawingPage> {
                                   Expanded(
                                     child: Text(
                                       "Processed Image",
-                                      style: GoogleFonts.poppins(
+                                      style: GoogleFonts.audiowide(
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
                                         color: Colors.blue.shade700,
@@ -373,7 +373,7 @@ class _DrawingPageState extends State<DrawingPage> {
                                       SizedBox(height: 8),
                                       Text(
                                         "Processed image will appear here",
-                                        style: GoogleFonts.poppins(
+                                        style: GoogleFonts.audiowide(
                                           color: Colors.grey.shade600,
                                           fontSize: 12,
                                         ),
@@ -406,7 +406,7 @@ class _DrawingPageState extends State<DrawingPage> {
                                 ),
                                 child: Text(
                                   statusMessage!,
-                                  style: GoogleFonts.poppins(
+                                  style: GoogleFonts.audiowide(
                                     fontSize: 10,
                                     color: statusMessage!.contains("Error")
                                         ? Colors.red.shade700
@@ -461,7 +461,7 @@ class _DrawingPageState extends State<DrawingPage> {
                       children: [
                         Icon(Icons.auto_fix_high),
                         SizedBox(width: 8),
-                        Text("Process Drawing"),
+                        Text("Process Drawing", style: GoogleFonts.audiowide())
                       ],
                     ),
                   ),
