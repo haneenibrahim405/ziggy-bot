@@ -5,12 +5,14 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:ziggy/service/prepare_points.dart';
+
 class ImageProcessor {
   // Configuration parameters
   static const int MAX_IMAGE_SIZE = 600;
   static const double DOUGLAS_PEUCKER_TOLERANCE = 2.5;
   static const int MIN_STROKE_LENGTH = 8;
-  static const int MAX_STROKES = 10000; // Increased to allow more strokes
+  static const int MAX_STROKES = 10000;
   static const int MORPHOLOGY_KERNEL_SIZE = 2;
 
   /// Process image directly from Image object - optimized for performance
@@ -668,14 +670,23 @@ class ImageProcessor {
   }
 
   /// Convert to ESP format with connected path (single start point)
+  /// Convert strokes to ESP format with stepper motor commands
   static List<Map<String, dynamic>> convertToESPFormat(List<List<Point>> strokes) {
-    if (strokes.isEmpty) return [];
+    // Convert to connected path first
+    List<Map<String, dynamic>> connectedPath = _convertConnectedPath(strokes);
 
-    // Option 1: Separate strokes (current behavior)
-    // return _convertSeparateStrokes(strokes);
+    if (connectedPath.isEmpty) return [];
 
-    // Option 2: Connected path from single start point
-    return _convertConnectedPath(strokes);
+    // Extract the actual path points
+    List<Map<String, dynamic>> pathPoints = List<Map<String, dynamic>>.from(
+        connectedPath.first['connectedPath']
+    );
+
+    // Convert to stepper commands
+    List<Map<String, dynamic>> stepperCommands = StepperMotorConverter.convertToStepperCommands(pathPoints);
+
+    // Format for ESP
+    return [StepperMotorConverter.formatForESP(stepperCommands)];
   }
 
   /// Convert as separate strokes (original method)

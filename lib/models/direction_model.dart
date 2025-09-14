@@ -125,16 +125,14 @@ class DirectionModel {
   int get hashCode => name.hashCode ^ angle.hashCode;
 }
 
-// فئة مساعدة للحسابات والعمليات على الاتجاهات
 class DirectionHelper {
-  // حساب المسافة بين زاويتين مع مراعاة الدورة الكاملة (360°)
+
   static double angleDifference(double angle1, double angle2) {
     double diff = (angle1 - angle2).abs();
     if (diff > 180) diff = 360 - diff;
     return diff;
   }
 
-  // العثور على أقرب اتجاه محدد للزاوية المعطاة
   static DirectionModel findClosestDirection(double targetAngle, List<DirectionModel> directions) {
     DirectionModel closest = directions.first;
     double minDiff = angleDifference(targetAngle, closest.angle);

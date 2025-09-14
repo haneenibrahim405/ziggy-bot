@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:math' as math;
+import 'dart:async';
+import 'package:http/http.dart' as http;
 import '../widgets/bottom_nav.dart';
 import '../widgets/interactive_compass_painter.dart';
 
@@ -17,9 +19,21 @@ class _CompassControlScreenState extends State<CompassControlScreen>
   double currentAngle = 0.0;
   bool isDragging = false;
   bool isDrawingEnabled = false;
+  bool isRobotMoving = false;
+  String robotStatus = "Ready";
+
+  // المتغيرات للإرسال المستمر السريع
+  Timer? _continuousTimer;
+  bool isHolding = false;
+  double currentHoldAngle = 0.0;
+  static const Duration _continuousInterval = Duration(milliseconds: 50);
+  bool _isCommandInProgress = false;
 
   late AnimationController _animationController;
   late Animation<double> _pulseAnimation;
+
+  // إزالة الـ static client واستخدام http عادي
+  bool _isDisposed = false;
 
   @override
   void initState() {
@@ -44,6 +58,8 @@ class _CompassControlScreenState extends State<CompassControlScreen>
 
   @override
   void dispose() {
+    _isDisposed = true;
+    _continuousTimer?.cancel();
     _animationController.dispose();
     super.dispose();
   }
@@ -55,9 +71,130 @@ class _CompassControlScreenState extends State<CompassControlScreen>
     return angle;
   }
 
-  // التحقق من أن النقطة داخل الدائرة
   bool _isPointInCircle(Offset center, Offset point, double radius) {
     return (point - center).distance <= radius;
+  }
+
+  int _convertToRobotAngle(double compassAngle) {
+    return compassAngle.round() % 360;
+  }
+
+  void _startContinuousCommand(double angle) {
+    print('ROBOT: Starting ultra-fast continuous hold at ${angle.toInt()}°');
+
+    isHolding = true;
+    currentHoldAngle = angle;
+
+    _sendContinuousRobotCommand(angle);
+
+    _continuousTimer?.cancel();
+    _continuousTimer = Timer.periodic(_continuousInterval, (timer) {
+      if (isHolding && !_isCommandInProgress && !_isDisposed) {
+        _sendContinuousRobotCommand(currentHoldAngle);
+      }
+    });
+
+    setState(() {
+      robotStatus = "Ultra-fast hold...";
+      isRobotMoving = true;
+    });
+  }
+
+  void _updateContinuousAngle(double angle) {
+    if (isHolding) {
+      currentHoldAngle = angle;
+    }
+  }
+
+  void _stopContinuousCommand() {
+    print('ROBOT: Stopping ultra-fast continuous command');
+
+    isHolding = false;
+    _continuousTimer?.cancel();
+    _continuousTimer = null;
+
+    _stopRobot();
+  }
+
+  Future<void> _sendContinuousRobotCommand(double angle) async {
+    if (!isHolding || _isCommandInProgress || _isDisposed) return;
+
+    int robotAngle = _convertToRobotAngle(angle);
+    _isCommandInProgress = true;
+
+    if (!_isDisposed) {
+      setState(() {
+        isRobotMoving = true;
+        robotStatus = "Fast $robotAngle°";
+      });
+    }
+
+    try {
+      String url = 'http://192.168.4.1/move?angle=$robotAngle&repeats=1';
+
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'User-Agent': 'Flutter-Compass',
+          'Connection': 'close',
+        },
+      ).timeout(Duration(milliseconds: 800));
+
+      if (response.statusCode == 200) {
+        print('✓ $robotAngle°');
+      } else {
+        print('✗ $robotAngle° (${response.statusCode})');
+        if (!_isDisposed) {
+          setState(() {
+            robotStatus = "Error ${response.statusCode}";
+          });
+        }
+      }
+
+    } catch (e) {
+      print('Connection error: $e');
+      if (!_isDisposed) {
+        setState(() {
+          robotStatus = "Connection error";
+        });
+      }
+    } finally {
+      _isCommandInProgress = false;
+    }
+  }
+
+  Future<void> _stopRobot() async {
+    if (_isDisposed) return;
+
+    print('ROBOT: Stopping...');
+
+    try {
+      final response = await http.get(
+        Uri.parse('http://192.168.4.1/stop'),
+        headers: {
+          'User-Agent': 'Flutter-Compass',
+          'Connection': 'close',
+        },
+      ).timeout(Duration(milliseconds: 1000));
+
+      if (response.statusCode == 200) {
+        print('ROBOT: Stopped');
+        if (!_isDisposed) {
+          setState(() {
+            robotStatus = "Stopped";
+            isRobotMoving = false;
+          });
+        }
+      }
+    } catch (e) {
+      print('Stop failed: $e');
+      if (!_isDisposed) {
+        setState(() {
+          robotStatus = "Ready";
+          isRobotMoving = false;
+        });
+      }
+    }
   }
 
   void _handlePanStart(DragStartDetails details, Size compassSize, Offset center) {
@@ -68,9 +205,15 @@ class _CompassControlScreenState extends State<CompassControlScreen>
       setState(() {
         isDragging = true;
         currentAngle = _calculateAngle(center, tapPosition);
+        robotStatus = "Starting...";
       });
+
       _animationController.forward();
-      _sendCommand(currentAngle);
+      _startContinuousCommand(currentAngle);
+
+      if (isDrawingEnabled) {
+        _setPenPosition(1);
+      }
     }
   }
 
@@ -81,10 +224,13 @@ class _CompassControlScreenState extends State<CompassControlScreen>
     final radius = compassSize.width / 2 - 20;
 
     if (_isPointInCircle(center, position, radius)) {
+      double newAngle = _calculateAngle(center, position);
+
       setState(() {
-        currentAngle = _calculateAngle(center, position);
+        currentAngle = newAngle;
       });
-      _sendCommand(currentAngle);
+
+      _updateContinuousAngle(currentAngle);
     }
   }
 
@@ -92,21 +238,33 @@ class _CompassControlScreenState extends State<CompassControlScreen>
     setState(() {
       isDragging = false;
     });
+
     _animationController.reverse();
-    _stopRobot();
+    _stopContinuousCommand();
+
+    if (isDrawingEnabled) {
+      _setPenPosition(0);
+    }
   }
 
-  Future<void> _sendCommand(double angle) async {
-    String action = isDrawingEnabled ? "move and draw" : "move only";
-    print('Robot command: ${action} at angle: ${angle.toInt()}°');
+  Future<void> _setPenPosition(int position) async {
+    if (_isDisposed) return;
 
-    // هنا يتم إرسال الأمر للروبوت
-    // await RobotController.moveToAngle(angle, shouldDraw: isDrawingEnabled);
-  }
+    try {
+      final response = await http.get(
+        Uri.parse('http://192.168.4.1/servo?pos=$position'),
+        headers: {
+          'User-Agent': 'Flutter-Compass',
+          'Connection': 'close',
+        },
+      ).timeout(Duration(milliseconds: 1000));
 
-  Future<void> _stopRobot() async {
-    print('Stopping robot movement');
-    // await RobotController.stop();
+      if (response.statusCode == 200) {
+        print('PEN: ${position == 0 ? "UP" : "DOWN"}');
+      }
+    } catch (e) {
+      print('PEN failed: $e');
+    }
   }
 
   String _getDirectionName(double angle) {
@@ -154,11 +312,19 @@ class _CompassControlScreenState extends State<CompassControlScreen>
           Image.asset("assets/ziggy.png", height: 80),
           const SizedBox(height: 10),
           Text(
-            "INTERACTIVE NAVIGATION",
+            "ULTRA-FAST NAVIGATION",
             style: GoogleFonts.audiowide(
               fontSize: 18,
               fontWeight: FontWeight.bold,
               color: const Color(0xFF231A4E),
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            "Hold and drag - Ultra fast (50ms)",
+            style: GoogleFonts.audiowide(
+              fontSize: 12,
+              color: Colors.grey[600],
             ),
           ),
         ],
@@ -169,41 +335,53 @@ class _CompassControlScreenState extends State<CompassControlScreen>
   Widget _buildControlOptions() {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      padding: EdgeInsets.all(16),
+      padding: EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey[300]!),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
         children: [
-          Text(
-            "Robot Mode:",
-            style: GoogleFonts.audiowide(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF231A4E),
-            ),
-          ),
           Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.flash_on,
+                color: Colors.blue[600],
+                size: 16,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                "Ultra Fast Mode",
+                style: GoogleFonts.audiowide(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: const Color(0xFF231A4E),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 Icons.directions_walk,
                 color: Colors.blue[600],
-                size: 20,
+                size: 16,
               ),
               const SizedBox(width: 5),
               Text(
                 "Move",
                 style: GoogleFonts.audiowide(
-                  fontSize: 12,
+                  fontSize: 10,
                   color: Colors.grey[700],
                 ),
               ),
               const SizedBox(width: 10),
               Transform.scale(
-                scale: 0.8,
+                scale: 0.6,
                 child: Switch(
                   value: isDrawingEnabled,
                   onChanged: (value) {
@@ -219,13 +397,13 @@ class _CompassControlScreenState extends State<CompassControlScreen>
               Icon(
                 Icons.edit,
                 color: Colors.green[600],
-                size: 20,
+                size: 16,
               ),
               const SizedBox(width: 5),
               Text(
                 "Draw",
                 style: GoogleFonts.audiowide(
-                  fontSize: 12,
+                  fontSize: 10,
                   color: Colors.grey[700],
                 ),
               ),
@@ -314,26 +492,28 @@ class _CompassControlScreenState extends State<CompassControlScreen>
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _getDirectionName(currentAngle),
-                      style: GoogleFonts.audiowide(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _getDirectionName(currentAngle),
+                        style: GoogleFonts.audiowide(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                    Text(
-                      "${currentAngle.toInt()}°",
-                      style: GoogleFonts.audiowide(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                      Text(
+                        "${currentAngle.toInt()}°",
+                        style: GoogleFonts.audiowide(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
                 Container(
                   padding: EdgeInsets.all(8),
@@ -342,7 +522,7 @@ class _CompassControlScreenState extends State<CompassControlScreen>
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
-                    isDrawingEnabled ? Icons.edit : Icons.navigation,
+                    isHolding ? Icons.flash_on : (isDrawingEnabled ? Icons.edit : Icons.navigation),
                     color: Colors.white,
                     size: 24,
                   ),
@@ -357,17 +537,17 @@ class _CompassControlScreenState extends State<CompassControlScreen>
             children: [
               Expanded(
                 child: _buildInfoCard(
-                  "Status",
-                  isDragging ? "Moving" : "Stopped",
-                  isDragging ? Colors.green : Colors.grey,
+                  "Robot Status",
+                  robotStatus,
+                  isRobotMoving ? Colors.green : Colors.grey,
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _buildInfoCard(
-                  "Mode",
-                  isDrawingEnabled ? "Move + Draw" : "Move Only",
-                  isDrawingEnabled ? Colors.orange : Colors.blue,
+                  "Speed Mode",
+                  isHolding ? "Ultra Fast" : "Ready",
+                  isHolding ? Colors.red : Colors.blue,
                 ),
               ),
             ],
@@ -405,6 +585,7 @@ class _CompassControlScreenState extends State<CompassControlScreen>
               fontWeight: FontWeight.bold,
               color: color,
             ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
