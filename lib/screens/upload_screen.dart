@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,6 +10,165 @@ import 'dart:convert';
 import '../service/image_processor.dart';
 import '../widgets/bottom_nav.dart';
 import 'package:http/http.dart' as http;
+
+// Python Server Service
+class PythonServerService {
+  static const String serverUrl = 'http://192.168.1.100:8000'; // Replace with your Python server IP
+  
+  static Future<ServerProcessingResult> processImageOnServer(img.Image image) async {
+    try {
+      Uint8List imageBytes = Uint8List.fromList(img.encodePng(image));
+      
+      var request = http.MultipartRequest(
+        'POST', 
+        Uri.parse('$serverUrl/upload/')
+      );
+      
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'image',
+          imageBytes,
+          filename: 'upload.png',
+        ),
+      );
+      
+      print("📤 Sending image to Python server...");
+      
+      var response = await request.send().timeout(Duration(seconds: 30));
+      
+      if (response.statusCode == 200) {
+        String responseBody = await response.stream.bytesToString();
+        Map<String, dynamic> jsonResponse = json.decode(responseBody);
+        
+        return ServerProcessingResult.fromJson(jsonResponse);
+      } else {
+        throw Exception('Server responded with status: ${response.statusCode}');
+      }
+      
+    } catch (e) {
+      print("❌ Error communicating with Python server: $e");
+      throw Exception('Failed to process on server: $e');
+    }
+  }
+  
+  static List<Map<String, dynamic>> convertToESPCommands(
+    List<List<dynamic>> optimizedStrokes, 
+    {double scale = 1.0}
+  ) {
+    List<Map<String, dynamic>> commands = [];
+    
+    for (var stroke in optimizedStrokes) {
+      if (stroke.length < 2) continue;
+      
+      for (int i = 0; i < stroke.length - 1; i++) {
+        var point1 = stroke[i];
+        var point2 = stroke[i + 1];
+        
+        double dx = (point2[0] - point1[0]) * scale;
+        double dy = (point2[1] - point1[1]) * scale;
+        
+        double distance = sqrt((dx * dx + dy * dy));
+        double angleRad = atan2(dy , dx);
+        int angleDeg = (angleRad * 180 / 3.14159).round() % 360;
+        if (angleDeg < 0) angleDeg += 360;
+        
+        int repeats = (distance / 1.0).ceil().clamp(1, 50);
+        
+        if (repeats > 0) {
+          commands.add({
+            'angle': angleDeg,
+            'repeats': repeats,
+            'originalDistance': distance,
+            'estimatedTime': _estimateCommandTime(repeats),
+          });
+        }
+      }
+    }
+    
+    return _optimizeCommands(commands);
+  }
+  
+  static List<Map<String, dynamic>> _optimizeCommands(List<Map<String, dynamic>> commands) {
+    if (commands.isEmpty) return [];
+    
+    List<Map<String, dynamic>> optimized = [];
+    Map<String, dynamic> current = Map.from(commands[0]);
+    
+    for (int i = 1; i < commands.length; i++) {
+      var next = commands[i];
+      
+      if (current['angle'] == next['angle']) {
+        int totalRepeats = (current['repeats'] + next['repeats']).clamp(1, 50);
+        current['repeats'] = totalRepeats;
+        current['estimatedTime'] = _estimateCommandTime(totalRepeats);
+      } else {
+        optimized.add(current);
+        current = Map.from(next);
+      }
+    }
+    
+    optimized.add(current);
+    return optimized;
+  }
+  
+  static int _estimateCommandTime(int repeats) {
+    const int baseTimePerRepeat = 150;
+    const int setupTime = 50;
+    return setupTime + (repeats * baseTimePerRepeat);
+  }
+}
+
+class ServerProcessingResult {
+  final List<List<dynamic>> optimizedStrokes;
+  final List<Map<String, dynamic>> robotPath;
+  final Map<String, dynamic> optimizationStats;
+  final String? processedImageBase64;
+  final bool success;
+  final String? error;
+  
+  ServerProcessingResult({
+    required this.optimizedStrokes,
+    required this.robotPath,
+    required this.optimizationStats,
+    this.processedImageBase64,
+    this.success = true,
+    this.error,
+  });
+  
+  factory ServerProcessingResult.fromJson(Map<String, dynamic> json) {
+    try {
+      return ServerProcessingResult(
+        optimizedStrokes: List<List<dynamic>>.from(
+          json['optimized_strokes']?.map((stroke) => List<dynamic>.from(stroke)) ?? []
+        ),
+        robotPath: List<Map<String, dynamic>>.from(
+          json['robot_path']?.map((point) => Map<String, dynamic>.from(point)) ?? []
+        ),
+        optimizationStats: Map<String, dynamic>.from(json['optimization_stats'] ?? {}),
+        processedImageBase64: json['processed_image'],
+        success: true,
+      );
+    } catch (e) {
+      return ServerProcessingResult(
+        optimizedStrokes: [],
+        robotPath: [],
+        optimizationStats: {},
+        success: false,
+        error: 'Failed to parse server response: $e',
+      );
+    }
+  }
+  
+  factory ServerProcessingResult.error(String message) {
+    return ServerProcessingResult(
+      optimizedStrokes: [],
+      robotPath: [],
+      optimizationStats: {},
+      success: false,
+      error: message,
+    );
+  }
+}
 
 class UploadScreen extends StatefulWidget {
   @override
@@ -24,12 +185,17 @@ class _UploadScreenState extends State<UploadScreen> {
   Map<String, dynamic> _processingStats = {};
   bool _isESPConnected = false;
 
-  // المتغيرات الجديدة لمنع التكرار
+  // Variables for preventing duplication
   bool _isSendingCommands = false;
   List<Map<String, dynamic>> _lastProcessedCommands = [];
 
-  // متغير الـ scale
-  double _drawingScale = 1.0; // القيمة الافتراضية 1.0 (الحجم الطبيعي)
+  // Scale variable
+  double _drawingScale = 1.0;
+
+  // Python server integration variables
+  bool _useServerProcessing = false;
+  ServerProcessingResult? _serverResult;
+  bool _isProcessingOnServer = false;
 
   final Color containerColor = Color(0xFFE0E0E0);
   final Color chooseButtonColor = Color(0xFF231A4E);
@@ -42,7 +208,6 @@ class _UploadScreenState extends State<UploadScreen> {
     _checkESPConnection();
   }
 
-  // Test ESP32 connection
   Future<void> _checkESPConnection() async {
     try {
       print("🔍 Testing ESP32 connection...");
@@ -88,8 +253,9 @@ class _UploadScreenState extends State<UploadScreen> {
           _extractedStrokes = [];
           _processingStats = {};
           responseMessage = null;
-          _lastProcessedCommands.clear(); // امسح الكوماندز القديمة
-          _drawingScale = 1.0; // إعادة تعيين الـ scale
+          _lastProcessedCommands.clear();
+          _drawingScale = 1.0;
+          _serverResult = null;
         });
       }
     } catch (e) {
@@ -117,7 +283,6 @@ class _UploadScreenState extends State<UploadScreen> {
     }
   }
 
-  // دالة معدلة لمعالجة الصورة
   Future<void> _processImage() async {
     if (_image == null || selectedImage == null) {
       setState(() {
@@ -128,32 +293,81 @@ class _UploadScreenState extends State<UploadScreen> {
 
     setState(() {
       isLoading = true;
-      responseMessage = "Processing image...";
-      _lastProcessedCommands.clear(); // امسح الكوماندز القديمة
+      responseMessage = _useServerProcessing 
+          ? "Processing image on Python server..." 
+          : "Processing image locally...";
+      _lastProcessedCommands.clear();
     });
 
     try {
-      ImageProcessingResult result = await ImageProcessor.processImageDirect(selectedImage);
-
-      if (result.success) {
-        setState(() {
-          _extractedStrokes = result.strokes;
-          _processedImageBase64 = result.processedImageBase64;
-          _processingStats = result.stats;
-          responseMessage = "Image processed successfully! Found ${result.strokes.length} strokes.";
-          isLoading = false;
-          _lastProcessedCommands.clear(); // امسح الكوماندز لإعادة المعالجة
-        });
+      if (_useServerProcessing) {
+        await _processImageOnServer();
       } else {
-        setState(() {
-          responseMessage = "Error processing image: ${result.error}";
-          isLoading = false;
-        });
+        await _processImageLocally();
       }
-
     } catch (e) {
       setState(() {
         responseMessage = "Error processing image: ${e.toString()}";
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _processImageOnServer() async {
+    setState(() {
+      _isProcessingOnServer = true;
+      responseMessage = "Sending image to Python server for advanced processing...";
+    });
+
+    try {
+      _serverResult = await PythonServerService.processImageOnServer(selectedImage!);
+      
+      if (_serverResult!.success) {
+        List<Map<String, dynamic>> serverCommands = PythonServerService.convertToESPCommands(
+          _serverResult!.optimizedStrokes,
+          scale: _drawingScale
+        );
+        
+        setState(() {
+          _extractedStrokes = _serverResult!.optimizedStrokes
+              .map((stroke) => stroke.map((point) => Point(point[0].toDouble(), point[1].toDouble())).toList())
+              .toList();
+          _lastProcessedCommands = serverCommands;
+          _processedImageBase64 = _serverResult!.processedImageBase64;
+          _processingStats = _serverResult!.optimizationStats;
+          responseMessage = "Server processing completed! Found ${_serverResult!.optimizedStrokes.length} optimized strokes.";
+          isLoading = false;
+          _isProcessingOnServer = false;
+        });
+      } else {
+        throw Exception(_serverResult!.error ?? "Server processing failed");
+      }
+      
+    } catch (e) {
+      setState(() {
+        responseMessage = "Server processing failed: $e. Falling back to local processing...";
+        _isProcessingOnServer = false;
+      });
+      
+      await _processImageLocally();
+    }
+  }
+
+  Future<void> _processImageLocally() async {
+    ImageProcessingResult result = await ImageProcessor.processImageDirect(selectedImage!);
+
+    if (result.success) {
+      setState(() {
+        _extractedStrokes = result.strokes;
+        _processedImageBase64 = result.processedImageBase64;
+        _processingStats = result.stats;
+        responseMessage = "Local processing completed! Found ${result.strokes.length} strokes.";
+        isLoading = false;
+        _lastProcessedCommands.clear();
+      });
+    } else {
+      setState(() {
+        responseMessage = "Error in local processing: ${result.error}";
         isLoading = false;
       });
     }
@@ -168,17 +382,34 @@ class _UploadScreenState extends State<UploadScreen> {
       _processingStats = {};
       responseMessage = null;
       isLoading = false;
-      _lastProcessedCommands.clear(); // امسح الكوماندز
-      _isSendingCommands = false; // إعادة تعيين حالة الإرسال
-      _drawingScale = 1.0; // إعادة تعيين الـ scale
+      _lastProcessedCommands.clear();
+      _isSendingCommands = false;
+      _drawingScale = 1.0;
+      _serverResult = null;
+      _useServerProcessing = false;
     });
   }
 
-  // دالة لاستخراج الكوماندز مرة واحدة فقط مع تطبيق الـ scale
   List<Map<String, dynamic>> _extractCommandsOnce() {
-    // لو الكوماندز موجودة مسبقاً والـ scale نفسه، ارجعها
+    if (_useServerProcessing && _serverResult != null && _serverResult!.success) {
+      if (_lastProcessedCommands.isNotEmpty) {
+        print("📄 Using cached server commands: ${_lastProcessedCommands.length} with scale $_drawingScale");
+        return _applyScaleToCommands(_lastProcessedCommands);
+      }
+      
+      List<Map<String, dynamic>> serverCommands = PythonServerService.convertToESPCommands(
+        _serverResult!.optimizedStrokes,
+        scale: _drawingScale
+      );
+      
+      _lastProcessedCommands = List.from(serverCommands);
+      print("🆕 Extracted fresh server commands: ${serverCommands.length}");
+      
+      return _applyScaleToCommands(serverCommands);
+    }
+    
     if (_lastProcessedCommands.isNotEmpty) {
-      print("🔄 Using cached commands: ${_lastProcessedCommands.length} with scale $_drawingScale");
+      print("📄 Using cached commands: ${_lastProcessedCommands.length} with scale $_drawingScale");
       return _applyScaleToCommands(_lastProcessedCommands);
     }
 
@@ -197,7 +428,7 @@ class _UploadScreenState extends State<UploadScreen> {
               commands.add({
                 'angle': angle,
                 'repeats': repeats,
-                'originalSteps': steps, // احفظ القيمة الأصلية
+                'originalSteps': steps,
                 'estimatedTime': _estimateCommandTime(repeats),
               });
             }
@@ -206,18 +437,15 @@ class _UploadScreenState extends State<UploadScreen> {
       }
     }
 
-    // احفظ الكوماندز الأصلية
     _lastProcessedCommands = List.from(commands);
     print("🆕 Extracted fresh commands: ${commands.length}");
 
-    // طبق الـ scale وارجع النتيجة
     return _applyScaleToCommands(commands);
   }
 
-  // دالة لتطبيق الـ scale على الكوماندز
   List<Map<String, dynamic>> _applyScaleToCommands(List<Map<String, dynamic>> originalCommands) {
     if (_drawingScale == 1.0) {
-      return originalCommands; // لو الـ scale = 1، ارجع نفس الكوماندز
+      return originalCommands;
     }
 
     List<Map<String, dynamic>> scaledCommands = [];
@@ -225,9 +453,8 @@ class _UploadScreenState extends State<UploadScreen> {
     for (var cmd in originalCommands) {
       int originalSteps = cmd['originalSteps'] ?? cmd['repeats'] * 50;
 
-      // طبق الـ scale على عدد الخطوات
       int scaledSteps = (originalSteps * _drawingScale).round();
-      int scaledRepeats = ((scaledSteps / 50).ceil()).clamp(1, 50); // حد أقصى 50 repeat
+      int scaledRepeats = ((scaledSteps / 50).ceil()).clamp(1, 50);
 
       scaledCommands.add({
         'angle': cmd['angle'],
@@ -242,11 +469,9 @@ class _UploadScreenState extends State<UploadScreen> {
     return scaledCommands;
   }
 
-  // دالة لحساب الحجم التقديري للرسم
   String _getEstimatedDrawingSize() {
     if (_extractedStrokes.isEmpty) return "N/A";
 
-    // حساب تقديري بناء على عدد الكوماندز والـ scale
     List<Map<String, dynamic>> commands = _extractCommandsOnce();
     double totalSteps = 0;
 
@@ -254,7 +479,6 @@ class _UploadScreenState extends State<UploadScreen> {
       totalSteps += (cmd['scaledSteps'] ?? cmd['repeats'] * 50);
     }
 
-    // كل 50 خطوة = 3 سم تقريباً
     double estimatedSizeCm = (totalSteps / 50) * 3 * _drawingScale;
 
     if (estimatedSizeCm < 100) {
@@ -264,27 +488,24 @@ class _UploadScreenState extends State<UploadScreen> {
     }
   }
 
-  // حساب الوقت المتوقع لتنفيذ command (بالميللي ثانية)
   int _estimateCommandTime(int repeats) {
-    const int baseTimePerRepeat = 150; // ms
-    const int setupTime = 50; // وقت البدء
+    const int baseTimePerRepeat = 150;
+    const int setupTime = 50;
     return setupTime + (repeats * baseTimePerRepeat);
   }
 
-  // حساب فترة الانتظار الذكية
   int _calculateSmartDelay(int repeats) {
     if (repeats <= 2) {
-      return 300; // 0.3 ثانية للحركات الصغيرة
+      return 300;
     } else if (repeats <= 5) {
-      return 500; // 0.5 ثانية للحركات المتوسطة
+      return 500;
     } else if (repeats <= 10) {
-      return 800; // 0.8 ثانية للحركات الكبيرة
+      return 800;
     } else {
-      return 1200; // 1.2 ثانية للحركات الكبيرة جدًا
+      return 1200;
     }
   }
 
-  // تجميع الكوماندز المتتالية ذات الزاوية نفسها
   List<Map<String, dynamic>> _groupSimilarCommands(List<Map<String, dynamic>> commands) {
     if (commands.isEmpty) return [];
 
@@ -294,12 +515,10 @@ class _UploadScreenState extends State<UploadScreen> {
     for (int i = 1; i < commands.length; i++) {
       Map<String, dynamic> next = commands[i];
 
-      // لو نفس الزاوية، اجمعهم
       if (current['angle'] == next['angle']) {
         int totalRepeats = (current['repeats'] + next['repeats']).clamp(1, 50);
         current['repeats'] = totalRepeats;
 
-        // اجمع الخطوات المقيسة أيضاً
         if (current.containsKey('scaledSteps') && next.containsKey('scaledSteps')) {
           current['scaledSteps'] = current['scaledSteps'] + next['scaledSteps'];
         }
@@ -309,11 +528,10 @@ class _UploadScreenState extends State<UploadScreen> {
       }
     }
 
-    grouped.add(current); // أضف آخر واحد
+    grouped.add(current);
     return grouped;
   }
 
-  // دالة لإرسال command واحد مع retry
   Future<bool> _sendSingleCommandWithRetry(int angle, int repeats, int commandNumber) async {
     String url = 'http://192.168.4.1/move?angle=$angle&repeats=$repeats';
 
@@ -340,7 +558,6 @@ class _UploadScreenState extends State<UploadScreen> {
         print("💥 Command $commandNumber error on attempt $attempt: $e");
       }
 
-      // انتظار قبل المحاولة التالية
       if (attempt < maxRetries) {
         await Future.delayed(Duration(milliseconds: 300));
       }
@@ -349,7 +566,6 @@ class _UploadScreenState extends State<UploadScreen> {
     return false;
   }
 
-  // دالة للتحقق من إنجاز الـ ESP
   Future<void> _checkIfESPFinished() async {
     try {
       print("🔍 Checking if ESP32 finished executing...");
@@ -362,7 +578,6 @@ class _UploadScreenState extends State<UploadScreen> {
       if (response.statusCode == 200) {
         print("📊 ESP32 status: ${response.body}");
 
-        // لو في معلومات عن الحالة في الـ response
         if (response.body.contains('"busy":false') || response.body.contains('"status":"idle"')) {
           setState(() {
             responseMessage = responseMessage! + "\n🤖 ESP32 confirmed: Drawing completed!";
@@ -374,7 +589,6 @@ class _UploadScreenState extends State<UploadScreen> {
     }
   }
 
-  // الدالة المحسنة لإرسال الكوماندز (مصححة)
   Future<void> _sendToESPOptimized() async {
     if (!_isESPConnected) {
       setState(() {
@@ -395,7 +609,6 @@ class _UploadScreenState extends State<UploadScreen> {
     });
 
     try {
-      // استخرج الكوماندز مرة واحدة فقط مع الـ scale
       List<Map<String, dynamic>> commands = _extractCommandsOnce();
 
       if (commands.isEmpty) {
@@ -406,12 +619,11 @@ class _UploadScreenState extends State<UploadScreen> {
         return;
       }
 
-      // تجميع الكوماندز المتشابهة
       List<Map<String, dynamic>> optimizedCommands = _groupSimilarCommands(commands);
 
       print("🔍 Original commands: ${commands.length}");
       print("🔍 Optimized commands: ${optimizedCommands.length}");
-      print("📏 Drawing scale: $_drawingScale");
+      print("🔍 Drawing scale: $_drawingScale");
 
       setState(() {
         responseMessage = "Sending ${optimizedCommands.length} scaled commands (scale: ${_drawingScale}x)...";
@@ -439,7 +651,6 @@ class _UploadScreenState extends State<UploadScreen> {
           print("❌ Command ${i + 1} failed after retries");
         }
 
-        // انتظار ذكي بناء على حجم الحركة
         if (success && i < optimizedCommands.length - 1) {
           int smartDelay = _calculateSmartDelay(repeats);
           print("⏳ Smart delay: ${smartDelay}ms for $repeats repeats");
@@ -451,7 +662,6 @@ class _UploadScreenState extends State<UploadScreen> {
           await Future.delayed(Duration(milliseconds: smartDelay));
         }
 
-        // تحديث التقدم
         double progress = ((i + 1) / optimizedCommands.length * 100);
         double elapsedSeconds = stopwatch.elapsedMilliseconds / 1000;
         setState(() {
@@ -462,7 +672,6 @@ class _UploadScreenState extends State<UploadScreen> {
       stopwatch.stop();
       double totalTimeSeconds = stopwatch.elapsedMilliseconds / 1000;
 
-      // رسالة الإنجاز النهائية
       setState(() {
         if (failCount == 0) {
           responseMessage = "🎉 ALL SCALED COMMANDS COMPLETED! ✅$successCount sent in ${totalTimeSeconds.toStringAsFixed(1)}s (Scale: ${_drawingScale}x). Robot finished drawing!";
@@ -471,7 +680,6 @@ class _UploadScreenState extends State<UploadScreen> {
         }
       });
 
-      // اختياري: تحقق من حالة الـ ESP للتأكد إنه خلص
       await _checkIfESPFinished();
 
     } catch (e) {
@@ -485,144 +693,59 @@ class _UploadScreenState extends State<UploadScreen> {
     }
   }
 
-  // إرسال command واحد للاستخدام في المتوازي
-  Future<bool> _sendSingleCommand(Map<String, dynamic> command) async {
-    int angle = command['angle'];
-    int repeats = command['repeats'];
-    String url = 'http://192.168.4.1/move?angle=$angle&repeats=$repeats';
-
-    try {
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {'Connection': 'close'},
-      ).timeout(Duration(seconds: 4));
-
-      return response.statusCode == 200;
-    } catch (e) {
-      print("Command error: $e");
-      return false;
+  String _getProcessingMethod() {
+    if (_useServerProcessing && _serverResult != null && _serverResult!.success) {
+      return "Python Server (Advanced)";
     }
+    return "Local Processing";
   }
 
-  // دالة محسنة للإرسال المتوازي مع منع التكرار
-  Future<void> _sendToESPSuperOptimized() async {
-    if (!_isESPConnected) {
-      setState(() {
-        responseMessage = "ESP32 not connected!";
-      });
-      return;
+  String _getStrokesCount() {
+    if (_serverResult != null && _serverResult!.success) {
+      return "${_serverResult!.optimizationStats['optimized_strokes'] ?? _serverResult!.optimizedStrokes.length}";
     }
+    return "${_processingStats['optimizedStrokes'] ?? _extractedStrokes.length}";
+  }
 
-    if (_isSendingCommands) {
-      setState(() {
-        responseMessage = "Commands already being sent! Please wait...";
-      });
-      return;
+  String _getTotalLength() {
+    if (_serverResult != null && _serverResult!.success) {
+      final distance = _serverResult!.optimizationStats['total_distance_mm'];
+      if (distance != null) {
+        return "${distance}mm";
+      }
     }
+    return "${_processingStats['totalLength'] ?? 0}px";
+  }
 
-    setState(() {
-      _isSendingCommands = true;
-    });
+  Widget _buildScalePresetButton(String label, double scale) {
+    bool isSelected = (_drawingScale - scale).abs() < 0.05;
 
-    try {
-      // استخرج الكوماندز مرة واحدة فقط مع الـ scale
-      List<Map<String, dynamic>> commands = _extractCommandsOnce();
-
-      if (commands.isEmpty) {
+    return GestureDetector(
+      onTap: _isSendingCommands ? null : () {
         setState(() {
-          responseMessage = "No valid commands to send!";
-          _isSendingCommands = false;
+          _drawingScale = scale;
+          _lastProcessedCommands.clear();
         });
-        return;
-      }
-
-      // تجميع الكوماندز المتشابهة
-      List<Map<String, dynamic>> optimizedCommands = _groupSimilarCommands(commands);
-
-      setState(() {
-        responseMessage = "Super optimized ${commands.length} → ${optimizedCommands.length} commands with ${_drawingScale}x scale. Parallel processing...";
-      });
-
-      await _sendCommandsWithConcurrencyFixed(optimizedCommands);
-
-    } catch (e) {
-      setState(() {
-        responseMessage = "💥 Error during parallel sending: $e";
-      });
-    } finally {
-      setState(() {
-        _isSendingCommands = false;
-      });
-    }
-  }
-
-  // دالة مصححة للإرسال المتوازي
-  Future<void> _sendCommandsWithConcurrencyFixed(List<Map<String, dynamic>> commands) async {
-    const int maxConcurrent = 2;
-    int successCount = 0;
-    int failCount = 0;
-    Stopwatch stopwatch = Stopwatch()..start();
-
-    print("🚀 Starting parallel sending of ${commands.length} scaled commands...");
-
-    for (int i = 0; i < commands.length; i += maxConcurrent) {
-      int endIndex = (i + maxConcurrent < commands.length) ? i + maxConcurrent : commands.length;
-      List<Map<String, dynamic>> batch = commands.sublist(i, endIndex);
-
-      print("📦 Processing batch ${(i ~/ maxConcurrent) + 1}: commands ${i + 1} to $endIndex");
-
-      // إرسال المجموعة بشكل متوازي
-      List<Future<bool>> futures = batch.asMap().entries.map((entry) {
-        int batchIndex = entry.key;
-        Map<String, dynamic> cmd = entry.value;
-        int globalIndex = i + batchIndex + 1;
-        return _sendSingleCommandWithRetry(cmd['angle'], cmd['repeats'], globalIndex);
-      }).toList();
-
-      List<bool> results = await Future.wait(futures);
-
-      // حساب النتائج وطباعة التفاصيل
-      for (int j = 0; j < results.length; j++) {
-        bool success = results[j];
-        Map<String, dynamic> cmd = batch[j];
-        int globalIndex = i + j + 1;
-
-        if (success) {
-          successCount++;
-          print("✅ Parallel command $globalIndex completed - Angle: ${cmd['angle']}, Repeats: ${cmd['repeats']} (Scale: $_drawingScale)");
-        } else {
-          failCount++;
-          print("❌ Parallel command $globalIndex failed - Angle: ${cmd['angle']}, Repeats: ${cmd['repeats']}");
-        }
-      }
-
-      // تحديث التقدم
-      double progress = ((i + batch.length) / commands.length * 100);
-      double elapsedSeconds = stopwatch.elapsedMilliseconds / 1000;
-      setState(() {
-        responseMessage = "Parallel Progress: ${progress.toStringAsFixed(0)}% (✅$successCount ❌$failCount) - ${elapsedSeconds.toStringAsFixed(1)}s - Scale: ${_drawingScale}x";
-      });
-
-      // انتظار بين المجموعات
-      if (i + maxConcurrent < commands.length) {
-        print("⏸️ Waiting 400ms before next batch...");
-        await Future.delayed(Duration(milliseconds: 400));
-      }
-    }
-
-    stopwatch.stop();
-    double totalTimeSeconds = stopwatch.elapsedMilliseconds / 1000;
-
-    setState(() {
-      if (failCount == 0) {
-        responseMessage = "🚀 ALL PARALLEL SCALED COMMANDS COMPLETED! ✅$successCount sent in ${totalTimeSeconds.toStringAsFixed(1)}s (Scale: ${_drawingScale}x). Robot finished drawing!";
-      } else {
-        responseMessage = "⚠️ Parallel completed: ✅$successCount successful, ❌$failCount failed in ${totalTimeSeconds.toStringAsFixed(1)}s";
-      }
-    });
-
-    // تحقق من حالة الـ ESP
-    await _checkIfESPFinished();
+      },
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.purple.shade600 : Colors.purple.shade100,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? Colors.purple.shade600 : Colors.purple.shade300,
+          ),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.audiowide(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: isSelected ? Colors.white : Colors.purple.shade700,
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -823,6 +946,84 @@ class _UploadScreenState extends State<UploadScreen> {
               ),
               const SizedBox(height: 20),
 
+              // Server Processing Toggle
+              if (_image != null) ...[
+                Container(
+                  padding: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.shade300),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.cloud, color: Colors.blue.shade700, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            "Processing Method",
+                            style: GoogleFonts.audiowide(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              "Use Python Server",
+                              style: GoogleFonts.audiowide(
+                                fontSize: 14,
+                                color: Colors.blue.shade600,
+                              ),
+                            ),
+                          ),
+                          Switch(
+                            value: _useServerProcessing,
+                            activeColor: Colors.blue.shade600,
+                            onChanged: isLoading ? null : (value) {
+                              setState(() {
+                                _useServerProcessing = value;
+                                _lastProcessedCommands.clear();
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        _useServerProcessing 
+                            ? "Advanced path optimization on Python server"
+                            : "Local image processing",
+                        style: GoogleFonts.audiowide(
+                          fontSize: 12,
+                          color: Colors.blue.shade500,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (_serverResult != null && _serverResult!.success) ...[
+                        SizedBox(height: 12),
+                        Text(
+                          "Current: ${_getProcessingMethod()}",
+                          style: GoogleFonts.audiowide(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade600,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                SizedBox(height: 20),
+              ],
+
               // Scale Control Section
               if (_extractedStrokes.isNotEmpty) ...[
                 Container(
@@ -870,7 +1071,7 @@ class _UploadScreenState extends State<UploadScreen> {
                               onChanged: _isSendingCommands ? null : (value) {
                                 setState(() {
                                   _drawingScale = value;
-                                  _lastProcessedCommands.clear(); // إعادة حساب الكوماندز
+                                  _lastProcessedCommands.clear();
                                 });
                               },
                             ),
@@ -977,7 +1178,7 @@ class _UploadScreenState extends State<UploadScreen> {
                         valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
-                        : Icon(Icons.auto_fix_high, size: 18, color: Colors.white),
+                        : Icon(_useServerProcessing ? Icons.cloud_sync : Icons.auto_fix_high, size: 18, color: Colors.white),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: uploadButtonColor,
                       foregroundColor: Colors.white,
@@ -985,13 +1186,12 @@ class _UploadScreenState extends State<UploadScreen> {
                       padding: EdgeInsets.symmetric(horizontal: 30, vertical: 12),
                     ),
                     label: Text(
-                      isLoading ? "Processing..." : "Process",
+                      isLoading ? "Processing..." : (_useServerProcessing ? "Server Process" : "Local Process"),
                       style: GoogleFonts.audiowide(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                   ),
 
                   if (_extractedStrokes.isNotEmpty) ...[
-                    // زرار الإرسال المحسن (الأساسي)
                     ElevatedButton.icon(
                       onPressed: (_isESPConnected && !_isSendingCommands) ? _sendToESPOptimized : null,
                       icon: _isSendingCommands
@@ -1014,36 +1214,7 @@ class _UploadScreenState extends State<UploadScreen> {
                         _isSendingCommands
                             ? "Sending..."
                             : _isESPConnected
-                            ? "Send Scaled"
-                            : "ESP32 not connected",
-                        style: GoogleFonts.audiowide(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                    ),
-
-                    // زرار الإرسال المتقدم (متوازي)
-                    ElevatedButton.icon(
-                      onPressed: (_isESPConnected && !_isSendingCommands) ? _sendToESPSuperOptimized : null,
-                      icon: _isSendingCommands
-                          ? SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
-                          : Icon(Icons.flash_on, size: 18, color: Colors.white),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: (_isESPConnected && !_isSendingCommands) ? Colors.purple.shade600 : Colors.grey,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        padding: EdgeInsets.symmetric(horizontal: 25, vertical: 12),
-                      ),
-                      label: Text(
-                        _isSendingCommands
-                            ? "Sending..."
-                            : _isESPConnected
-                            ? "Super Fast"
+                            ? "Send to Robot"
                             : "ESP32 not connected",
                         style: GoogleFonts.audiowide(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
@@ -1055,7 +1226,7 @@ class _UploadScreenState extends State<UploadScreen> {
               const SizedBox(height: 20),
 
               // Processing stats
-              if (_processingStats.isNotEmpty) ...[
+              if (_processingStats.isNotEmpty || (_serverResult != null && _serverResult!.optimizationStats.isNotEmpty)) ...[
                 Container(
                   padding: EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -1071,7 +1242,7 @@ class _UploadScreenState extends State<UploadScreen> {
                           Icon(Icons.analytics, color: Colors.blue.shade700, size: 20),
                           SizedBox(width: 8),
                           Text(
-                            "Processing Results",
+                            "Processing Results - ${_getProcessingMethod()}",
                             style: GoogleFonts.audiowide(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -1086,7 +1257,7 @@ class _UploadScreenState extends State<UploadScreen> {
                           Column(
                             children: [
                               Text(
-                                "${_processingStats['optimizedStrokes']}",
+                                "${_getStrokesCount()}",
                                 style: GoogleFonts.audiowide(
                                   fontSize: 24,
                                   fontWeight: FontWeight.bold,
@@ -1102,7 +1273,7 @@ class _UploadScreenState extends State<UploadScreen> {
                           Column(
                             children: [
                               Text(
-                                "${_processingStats['totalLength']}px",
+                                "${_getTotalLength()}",
                                 style: GoogleFonts.audiowide(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
@@ -1115,6 +1286,24 @@ class _UploadScreenState extends State<UploadScreen> {
                               ),
                             ],
                           ),
+                          if (_serverResult != null && _serverResult!.optimizationStats.containsKey('efficiency_ratio')) ...[
+                            Column(
+                              children: [
+                                Text(
+                                  "${_serverResult!.optimizationStats['efficiency_ratio']}%",
+                                  style: GoogleFonts.audiowide(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.purple.shade700,
+                                  ),
+                                ),
+                                Text(
+                                  "Efficiency",
+                                  style: GoogleFonts.audiowide(fontSize: 12, color: Colors.purple.shade600),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ],
@@ -1132,12 +1321,12 @@ class _UploadScreenState extends State<UploadScreen> {
                     ),
                     SizedBox(height: 10),
                     Text(
-                      "Processing image...",
+                      _useServerProcessing ? "Processing on server..." : "Processing image...",
                       style: GoogleFonts.audiowide(fontSize: 16, color: uploadButtonColor),
                     ),
                     SizedBox(height: 5),
                     Text(
-                      "This may take a few seconds",
+                      _useServerProcessing ? "Server processing may take longer" : "This may take a few seconds",
                       style: GoogleFonts.audiowide(fontSize: 12, color: Colors.grey),
                     ),
                   ],
@@ -1151,19 +1340,19 @@ class _UploadScreenState extends State<UploadScreen> {
                   padding: EdgeInsets.all(16),
                   margin: EdgeInsets.symmetric(horizontal: 20),
                   decoration: BoxDecoration(
-                    color: responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED")
+                    color: responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED") || responseMessage!.contains("Server processing completed")
                         ? Colors.green.shade50
                         : responseMessage!.contains("Error") || responseMessage!.contains("failed") || responseMessage!.contains("Cannot") || responseMessage!.contains("❌")
                         ? Colors.red.shade50
-                        : responseMessage!.contains("Optimized") || responseMessage!.contains("Progress") || responseMessage!.contains("Parallel") || responseMessage!.contains("Sending") || responseMessage!.contains("Scale")
+                        : responseMessage!.contains("Optimized") || responseMessage!.contains("Progress") || responseMessage!.contains("Parallel") || responseMessage!.contains("Sending") || responseMessage!.contains("Scale") || responseMessage!.contains("server")
                         ? Colors.orange.shade50
                         : Colors.blue.shade50,
                     border: Border.all(
-                      color: responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED")
+                      color: responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED") || responseMessage!.contains("Server processing completed")
                           ? Colors.green.shade300
                           : responseMessage!.contains("Error") || responseMessage!.contains("failed") || responseMessage!.contains("Cannot") || responseMessage!.contains("❌")
                           ? Colors.red.shade300
-                          : responseMessage!.contains("Optimized") || responseMessage!.contains("Progress") || responseMessage!.contains("Parallel") || responseMessage!.contains("Sending") || responseMessage!.contains("Scale")
+                          : responseMessage!.contains("Optimized") || responseMessage!.contains("Progress") || responseMessage!.contains("Parallel") || responseMessage!.contains("Sending") || responseMessage!.contains("Scale") || responseMessage!.contains("server")
                           ? Colors.orange.shade300
                           : Colors.blue.shade300,
                     ),
@@ -1172,20 +1361,20 @@ class _UploadScreenState extends State<UploadScreen> {
                   child: Row(
                     children: [
                       Icon(
-                        responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED")
+                        responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED") || responseMessage!.contains("Server processing completed")
                             ? Icons.check_circle
                             : responseMessage!.contains("Error") || responseMessage!.contains("failed") || responseMessage!.contains("Cannot") || responseMessage!.contains("❌")
                             ? Icons.error
                             : responseMessage!.contains("Progress") || responseMessage!.contains("Sending") || responseMessage!.contains("Parallel")
                             ? Icons.sync
-                            : responseMessage!.contains("Optimized") || responseMessage!.contains("Scale")
+                            : responseMessage!.contains("Optimized") || responseMessage!.contains("Scale") || responseMessage!.contains("server")
                             ? Icons.speed
                             : Icons.info,
-                        color: responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED")
+                        color: responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED") || responseMessage!.contains("Server processing completed")
                             ? Colors.green.shade700
                             : responseMessage!.contains("Error") || responseMessage!.contains("failed") || responseMessage!.contains("Cannot") || responseMessage!.contains("❌")
                             ? Colors.red.shade700
-                            : responseMessage!.contains("Optimized") || responseMessage!.contains("Progress") || responseMessage!.contains("Parallel") || responseMessage!.contains("Sending") || responseMessage!.contains("Scale")
+                            : responseMessage!.contains("Optimized") || responseMessage!.contains("Progress") || responseMessage!.contains("Parallel") || responseMessage!.contains("Sending") || responseMessage!.contains("Scale") || responseMessage!.contains("server")
                             ? Colors.orange.shade700
                             : Colors.blue.shade700,
                       ),
@@ -1195,11 +1384,11 @@ class _UploadScreenState extends State<UploadScreen> {
                           responseMessage!,
                           style: GoogleFonts.audiowide(
                             fontSize: 14,
-                            color: responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED")
+                            color: responseMessage!.contains("successfully") || responseMessage!.contains("Connected") || responseMessage!.contains("🎉") || responseMessage!.contains("🚀") || responseMessage!.contains("COMPLETED") || responseMessage!.contains("Server processing completed")
                                 ? Colors.green.shade700
                                 : responseMessage!.contains("Error") || responseMessage!.contains("failed") || responseMessage!.contains("Cannot") || responseMessage!.contains("❌")
                                 ? Colors.red.shade700
-                                : responseMessage!.contains("Optimized") || responseMessage!.contains("Progress") || responseMessage!.contains("Parallel") || responseMessage!.contains("Sending") || responseMessage!.contains("Scale")
+                                : responseMessage!.contains("Optimized") || responseMessage!.contains("Progress") || responseMessage!.contains("Parallel") || responseMessage!.contains("Sending") || responseMessage!.contains("Scale") || responseMessage!.contains("server")
                                 ? Colors.orange.shade700
                                 : Colors.blue.shade700,
                             fontWeight: FontWeight.w500,
@@ -1213,38 +1402,6 @@ class _UploadScreenState extends State<UploadScreen> {
               ],
 
             ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Helper method لإنشاء أزرار الـ scale المعدة مسبقاً
-  Widget _buildScalePresetButton(String label, double scale) {
-    bool isSelected = (_drawingScale - scale).abs() < 0.05;
-
-    return GestureDetector(
-      onTap: _isSendingCommands ? null : () {
-        setState(() {
-          _drawingScale = scale;
-          _lastProcessedCommands.clear(); // إعادة حساب الكوماندز
-        });
-      },
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? Colors.purple.shade600 : Colors.purple.shade100,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? Colors.purple.shade600 : Colors.purple.shade300,
-          ),
-        ),
-        child: Text(
-          label,
-          style: GoogleFonts.audiowide(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: isSelected ? Colors.white : Colors.purple.shade700,
           ),
         ),
       ),
